@@ -1,31 +1,35 @@
 import streamlit as st
 import json
 import os
-from datetime import datetime
+from supabase import create_client, Client
 
-# --- 設定と初期化 ---
-# フォルダのパスを動的に取得します
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, "knowledge_base.json")
+# --- 設定 ---
+# あなたの情報をここに貼り付けてください
+SUPABASE_URL = "ozlqdcyfnzvvmflynsgt"  # あなたのProject URL
+SUPABASE_KEY = "sb.publishable_UevmmGYTZEZ...（ここにコピーしたAPIキーを貼る）" # あなたのAPIキー
 
-def load_config():
+# Supabaseクライアントの初期化
+# ※APIキーが正しい場合のみ動作します
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    st.error(f"Supabaseへの接続に失敗しました。URLとAPIキーが正しいか確認してください。: {e}")
+
+# --- データの読み書き関数 ---
+# データの「バックアップ」としてローカルのJSONも保持する仕組みにします
+CONFIG_FILE = "knowledge_base.json"
+
+def load_local_config():
     default_config = {
-        "entries": [],
-        "categories": ["家電", "IT・ツール", "株・投資", "その他"]
+        "categories": ["家電", "IT・ツール", "株・投資", "その他"],
+        "history": {}
     }
-    
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            loaded_config = json.load(f)
-            # 足りない項目があれば補う
-            for key in default_config:
-                if key not in loaded_config:
-                    loaded_config[key] = default_config[key]
-            return loaded_config
-    else:
-        return default_config
+            return json.load(f)
+    return default_config
 
-def save_config(config):
+def save_local_config(config):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=4)
 
@@ -34,36 +38,37 @@ config = load_config()
 # --- 画面の構成 ---
 st.set_page_config(page_title="自分専用・知識ベース", layout="centered")
 
-# --- ヘッダー ---
 st.title("📚 知識ベース")
-st.write("身の回りの取説や、学んだことをストックする場所です。")
+st.write("Supabaseと連携した、消えない知識ベースです。")
 
-# --- サイドバー：新規登録と検索 ---
+# --- サイドバー：新規登録 ---
 with st.sidebar:
     st.header("⚙️ 新規登録")
     new_title = st.text_input("タイトル")
     new_cat = st.selectbox("カテゴリ", config["categories"])
-    new_desc = st.text_area("説明", placeholder="概要を書いてください")
-    new_how = st.text_area("使い方", placeholder="手順などを書いてください")
-    new_term = st.text_area("用語", placeholder="専門用語の解説")
-    new_set = st.text_input("設定", placeholder="パスや注意点など")
+    new_desc = st.text_area("説明")
+    new_how = st.text_area("使い方")
+    new_term = st.text_area("用語")
+    new_set = st.text_input("設定")
     
     if st.button("保存する", type="primary"):
         if new_title:
-            new_entry = {
-                "id": str(datetime.now().timestamp()),
-                "title": new_title,
-                "category": new_cat,
-                "description": new_desc,
-                "how_to_use": new_how,
-                "terminology": new_term,
-                "settings": new_set,
-                "date": datetime.now().strftime("%Y-%m-%d")
-            }
-            config["entries"].append(new_entry)
-            save_config(config)
-            st.success("保存しました！")
-            st.rerun()
+            # Supabaseへデータを挿入
+            try:
+                response = supabase.table("entries").insert({
+                    "title": new_title,
+                    "category": new_cat,
+                    "description": new_desc,
+                    "how_to_use": new_how,
+                    "terminology": new_term,
+                    "settings": new_set
+                }).execute()
+                
+                if response.data:
+                    st.success("Supabaseに保存しました！")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"保存中にエラーが発生しました: {e}")
         else:
             st.warning("タイトルを入力してください")
             
@@ -72,31 +77,31 @@ with st.sidebar:
     search_query = st.text_input("キーワードで検索")
 
 # --- メインコンテンツ ---
-# 検索とカテゴリフィルタの適用
-filtered_entries = []
-if search_query:
-    filtered_entries = [
-        e for e in config["entries"] 
-        if search_query in e["title"] or search_query in e["description"] or search_query in e["how_to_use"]
-    ]
-else:
-    filtered_entries = config["entries"]
-
-# カテゴリ選択の反映（検索と組み合わせる）
-# 今回は簡易的に検索優先とし、検索がない場合のみカテゴリを考慮する形にします
-# もし特定のカテゴリを絞り込みたい場合はここにロジックを追加します
+# データ取得（Supabaseから最新を取得）
+try:
+    # 検索条件の整理
+    query = supabase.table("entries").select("*")
+    if search_query:
+        # タイトルまたは内容にキーワードが含まれるものを取得
+        query = query.ilike("title", f"%{search_query}%").or_("description", f"%{search_query}%")
+    
+    response = query.execute()
+    entries = response.data
+except Exception as e:
+    st.error(f"データの取得に失敗しました: {e}")
+    entries = []
 
 # 表示の切り替え
 if "view_id" in st.session_state:
     # 詳細表示画面
-    entry = next((e for e in filtered_entries if e["id"] == st.session_state.view_id), None)
+    entry = next((e for e in entries if e["id"] == st.session_state.view_id), None)
     if entry:
         if st.button("← 一覧に戻る"):
             st.session_state.view_id = None
             st.rerun()
         
         st.markdown(f"## {entry['title']}")
-        st.caption(f"カテゴリ: {entry['category']} | 登録日: {entry['date']}")
+        st.caption(f"カテゴリ: {entry['category']}")
         st.write("---")
         
         st.markdown("### 📝 説明")
@@ -114,12 +119,11 @@ if "view_id" in st.session_state:
         st.warning("データが見つかりません。")
 else:
     # 一覧表示画面
-    if not filtered_entries:
+    if not entries:
         st.info("登録されている知識がありません。サイドバーから追加してください。")
     else:
-        for entry in filtered_entries:
+        for entry in entries:
             with st.container():
-                # カード風の表示
                 st.markdown(f"""
                 <div style="
                     background-color: #f0f2f6;
@@ -132,7 +136,6 @@ else:
                     <p style="font-size: 16px; color: #666; margin: 5px 0;">{entry['category']}</p>
                 </div>
                 """, unsafe_allow_html=True)
-                # クリックで詳細を見るためのボタン（擬似的な挙動）
                 if st.button(f"詳細を見る", key=f"btn_{entry['id']}"):
                     st.session_state.view_id = entry["id"]
                     st.rerun()
