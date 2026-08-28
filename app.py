@@ -4,34 +4,35 @@ import os
 from supabase import create_client, Client
 
 # --- 設定 ---
-# あなたの情報をここに貼り付けてください
-SUPABASE_URL = "ozlqdcyfnzvvmflynsgt"  # あなたのProject URL
-SUPABASE_KEY = "sb.publishable_UevmmGYTZEZ...（ここにコピーしたAPIキーを貼る）" # あなたのAPIキー
+# ここにSupabaseの情報を正しく貼り付けてください！
+SUPABASE_URL = "https://ozlqdcyfnzvvmflynsgt.supabase.co" 
+SUPABASE_KEY = "sb_publishable_UeVmmGVGTZE2Za0a8sGIQw_Wnc15XtW"
 
 # Supabaseクライアントの初期化
-# ※APIキーが正しい場合のみ動作します
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 except Exception as e:
-    st.error(f"Supabaseへの接続に失敗しました。URLとAPIキーが正しいか確認してください。: {e}")
+    st.error(f"Supabaseへの接続に失敗しました。URLとAPIキーを再確認してください。: {e}")
+    st.stop()
 
-# --- データの読み書き関数 ---
-# データの「バックアップ」としてローカルのJSONも保持する仕組みにします
-CONFIG_FILE = "knowledge_base.json"
+# --- データの読み込み（ローカルの補助用） ---
+CONFIG_FILE = "config.json"
 
-def load_local_config():
+def load_config():
     default_config = {
         "categories": ["家電", "IT・ツール", "株・投資", "その他"],
         "history": {}
     }
+    
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return default_config
-
-def save_local_config(config):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
+            loaded_config = json.load(f)
+            for key in default_config:
+                if key not in loaded_config:
+                    loaded_config[key] = default_config[key]
+            return loaded_config
+    else:
+        return default_config
 
 config = load_config()
 
@@ -39,7 +40,7 @@ config = load_config()
 st.set_page_config(page_title="自分専用・知識ベース", layout="centered")
 
 st.title("📚 知識ベース")
-st.write("Supabaseと連携した、消えない知識ベースです。")
+st.write("身の回りの取説や、学んだことをストックする場所です。")
 
 # --- サイドバー：新規登録 ---
 with st.sidebar:
@@ -53,8 +54,8 @@ with st.sidebar:
     
     if st.button("保存する", type="primary"):
         if new_title:
-            # Supabaseへデータを挿入
             try:
+                # Supabaseへデータを挿入
                 response = supabase.table("entries").insert({
                     "title": new_title,
                     "category": new_cat,
