@@ -7,7 +7,7 @@ import google.generativeai as genai
 from supabase import create_client, Client
 
 # --- 設定 ---
-# Streamlitの「Secrets」から全ての情報を読み込みます
+# 直接書かずに、Streamlitの「Secrets」から読み込みます
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -17,8 +17,12 @@ except KeyError:
     st.stop()
 
 # Geminiの初期設定
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+try:
+    genai.configure(api_key=GEMINI_API_KEY)
+    # モデルを安定した 'gemini-pro' に設定
+    model = genai.GenerativeModel('gemini-pro')
+except Exception as e:
+    st.error(f"AIの初期化に失敗しました: {e}")
 
 # Supabaseクライアントの初期化
 try:
@@ -180,12 +184,16 @@ if "view_id" in st.session_state:
         st.markdown(f"## {entry['title']}")
         st.caption(f"カテゴリ: {entry['category']}")
         st.write("---")
+        
         st.markdown("### 📝 説明")
         st.write(entry["description"])
+        
         st.markdown("### 🛠 使い方")
         st.write(entry["how_to_use"])
+        
         st.markdown("### 📖 用語")
         st.write(entry["terminology"])
+        
         st.markdown("### ⚙️ 設定")
         st.write(entry["settings"])
     else:
