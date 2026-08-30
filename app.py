@@ -7,7 +7,7 @@ import google.generativeai as genai
 from supabase import create_client, Client
 
 # --- 設定 ---
-# ここには何も書き込まないでください。すべてStreamlitの管理画面から読み込みます。
+# 直接書かずに、Streamlitの「Secrets」から読み込みます
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -19,7 +19,8 @@ except KeyError:
 # Geminiの初期設定
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-pro')
+    # モデルを安定した 'gemini-pro' に設定
+   model = genai.GenerativeModel('gemini-1.5-pro')
 except Exception as e:
     st.error(f"AIの初期化に失敗しました: {e}")
 
@@ -30,44 +31,56 @@ except Exception as e:
     st.error(f"Supabaseへの接続に失敗しました。URLとAPIキーを再確認してください。: {e}")
     st.stop()
 
-# --- データの読み込み ---
+# --- データの読み込み（ローカルの補助用） ---
 CONFIG_FILE = "config.json"
+
 def load_config():
-    default_config = {"categories": ["家電", "IT・ツール", "株・投資", "その他"], "history": {}}
+    default_config = {
+        "categories": ["家電", "IT・ツール", "株・投資", "その他"],
+        "history": {}
+    }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             loaded_config = json.load(f)
             for key in default_config:
-                if key not in loaded_config: loaded_config[key] = default_config[key]
+                if key not in loaded_config:
+                    loaded_config[key] = default_config[key]
             return loaded_config
-    return default_config
+    else:
+        return default_config
 
 config = load_config()
 
 # --- 関数定義 ---
 def extract_text_from_pdf(uploaded_file):
+    """PDFから全ページ分のテキストを抽出する"""
     try:
         with pdfplumber.open(io.BytesIO(uploaded_file.getvalue())) as pdf:
             full_text = ""
             for page in pdf.pages:
                 text = page.extract_text()
-                if text: full_text += text + "\n"
+                if text:
+                    full_text += text + "\n"
             return full_text
     except Exception as e:
         st.error(f"PDF処理中にエラーが発生しました: {e}")
         return None
 
 def generate_ai_summary(raw_text):
+    """AIを使ってテキストを4つの項目に要約する"""
     prompt = f"""
     以下のテキストは、家電の取扱説明書や技術資料から抽出されたものです。
     この内容を元に、以下の4つの項目に分けて日本語でわかりやすく要約してください。
+    
     項目：
     1. 📝 説明（概要を短く）
     2. 🛠 使い方（重要な操作手順を箇条書きで）
     3. 📖 用語（重要な言葉の解説）
     4. ⚙️ 設定（注意点や設定のコツ）
+
     テキスト：
     {raw_text}
+    
     出力形式（JSON形式で返してください）:
     {{
         "description": "...",
@@ -86,6 +99,7 @@ def generate_ai_summary(raw_text):
 
 # --- 画面の構成 ---
 st.set_page_config(page_title="自分専用・知識ベース", layout="wide")
+
 st.title("📚 知識ベース")
 st.write("身の回りの取説や、学んだことをストックする場所です。")
 
@@ -103,8 +117,12 @@ with st.sidebar:
         if new_title:
             try:
                 response = supabase.table("entries").insert({
-                    "title": new_title, "category": new_cat, "description": new_desc,
-                    "how_to_use": new_how, "terminology": new_term, "settings": new_set
+                    "title": new_title,
+                    "category": new_cat,
+                    "description": new_desc,
+                    "how_to_use": new_how,
+                    "terminology": new_term,
+                    "settings": new_set
                 }).execute()
                 if response.data:
                     st.success("Supabaseに保存しました！")
@@ -149,6 +167,7 @@ try:
     query = supabase.table("entries").select("*")
     if search_query:
         query = query.ilike("title", f"%{search_query}%").or_("description", f"%{search_query}%")
+    
     response = query.execute()
     entries = response.data
 except Exception as e:
@@ -161,15 +180,20 @@ if "view_id" in st.session_state:
         if st.button("← 一覧に戻る"):
             st.session_state.view_id = None
             st.rerun()
+        
         st.markdown(f"## {entry['title']}")
         st.caption(f"カテゴリ: {entry['category']}")
         st.write("---")
+        
         st.markdown("### 📝 説明")
         st.write(entry["description"])
+        
         st.markdown("### 🛠 使い方")
         st.write(entry["how_to_use"])
+        
         st.markdown("### 📖 用語")
         st.write(entry["terminology"])
+        
         st.markdown("### ⚙️ 設定")
         st.write(entry["settings"])
     else:
@@ -179,6 +203,7 @@ elif "ai_draft" in st.session_state:
     draft = st.session_state["ai_draft"]
     st.header("🤖 AIが作った下書き")
     st.info("内容を確認し、必要であれば修正してから「保存する」を押してください。")
+    
     st.markdown("---")
     final_title = st.text_input("タイトル", value=draft["title"])
     final_cat = st.selectbox("カテゴリ", config["categories"], index=config["categories"].index(draft["category"]) if draft["category"] in config["categories"] else 0)
@@ -190,8 +215,12 @@ elif "ai_draft" in st.session_state:
     if st.button("この内容で保存する", type="primary", use_container_width=True):
         try:
             response = supabase.table("entries").insert({
-                "title": final_title, "category": final_cat, "description": final_desc,
-                "how_to_use": final_how, "terminology": final_term, "settings": final_set
+                "title": final_title,
+                "category": final_cat,
+                "description": final_desc,
+                "how_to_use": final_how,
+                "terminology": final_term,
+                "settings": final_set
             }).execute()
             if response.data:
                 st.success("保存しました！")
@@ -207,7 +236,13 @@ else:
         for entry in entries:
             with st.container():
                 st.markdown(f"""
-                <div style="background-color: #f0f2f6; padding: 20px; border-radius: 15px; margin-bottom: 15px; border: 1px solid #ddd;">
+                <div style="
+                    background-color: #f0f2f6;
+                    padding: 20px;
+                    border-radius: 15px;
+                    margin-bottom: 15px;
+                    border: 1px solid #ddd;
+                ">
                     <p style="font-size: 20px; font-weight: bold; margin: 0; color: #333;">{entry['title']}</p>
                     <p style="font-size: 16px; color: #666; margin: 5px 0;">{entry['category']}</p>
                 </div>
