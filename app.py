@@ -3,12 +3,22 @@ import json
 import os
 import io
 import pdfplumber
+import google.generativeai as genai
 from supabase import create_client, Client
 
 # --- 設定 ---
-# ここにSupabaseの情報を正しく貼り付けてください！
-SUPABASE_URL = "https://ozlqdcyfnzvvmflynsgt.supabase.co" 
-SUPABASE_KEY = "sb_publishable_UeVmmGVGTZE2Za0a8sGIQw_Wnc15XtW"
+# 直接書かずに、Streamlitの「Secrets」から読み込むように変更しました
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except KeyError:
+    st.error("エラー: 設定（Secrets）が見つかりません。Streamlitの管理画面から設定してください。")
+    st.stop()
+
+# Geminiの初期設定
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # Supabaseクライアントの初期化
 try:
@@ -25,7 +35,6 @@ def load_config():
         "categories": ["家電", "IT・ツール", "株・投資", "その他"],
         "history": {}
     }
-    
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             loaded_config = json.load(f)
@@ -53,6 +62,37 @@ def extract_text_from_pdf(uploaded_file):
         st.error(f"PDF処理中にエラーが発生しました: {e}")
         return None
 
+def generate_ai_summary(raw_text):
+    """AIを使ってテキストを4つの項目に要約する"""
+    prompt = f"""
+    以下のテキストは、家電の取扱説明書や技術資料から抽出されたものです。
+    この内容を元に、以下の4つの項目に分けて日本語でわかりやすく要約してください。
+    
+    項目：
+    1. 📝 説明（概要を短く）
+    2. 🛠 使い方（重要な操作手順を箇条書きで）
+    3. 📖 用語（重要な言葉の解説）
+    4. ⚙️ 設定（注意点や設定のコツ）
+
+    テキスト：
+    {raw_text}
+    
+    出力形式（JSON形式で返してください）:
+    {{
+        "description": "...",
+        "how_to_use": "...",
+        "terminology": "...",
+        "settings": "..."
+    }}
+    """
+    try:
+        response = model.generate_content(prompt)
+        content = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(content)
+    except Exception as e:
+        st.error(f"AIによる要約中にエラーが発生しました: {e}")
+        return None
+
 # --- 画面の構成 ---
 st.set_page_config(page_title="自分専用・知識ベース", layout="wide")
 
@@ -72,7 +112,6 @@ with st.sidebar:
     if st.button("保存する", type="primary"):
         if new_title:
             try:
-                # Supabaseへデータを挿入
                 response = supabase.table("entries").insert({
                     "title": new_title,
                     "category": new_cat,
@@ -81,7 +120,6 @@ with st.sidebar:
                     "terminology": new_term,
                     "settings": new_set
                 }).execute()
-                
                 if response.data:
                     st.success("Supabaseに保存しました！")
                     st.rerun()
@@ -95,26 +133,35 @@ with st.sidebar:
     search_query = st.text_input("キーワードで検索")
     
     st.write("---")
-    st.header("📄 PDFから抽出")
+    st.header("📄 PDFからAI要約")
     uploaded_file = st.file_uploader("PDFファイルを選択...", type=["pdf"])
     if uploaded_file is not None:
-        if st.button("PDFを読み取る"):
-            with st.spinner("読み取り中..."):
-                extracted_text = extract_text_from_pdf(uploaded_file)
-                if extracted_text:
-                    st.success("読み取り完了！")
-                    st.info("以下のテキストをコピーして「新規登録」に貼り付けてください。")
-                    st.text_area("抽出された内容", extracted_text, height=300)
+        if st.button("AIで要約を作成"):
+            with st.spinner("PDFを読み取り、AIが要約を作成中..."):
+                raw_text = extract_text_from_pdf(uploaded_file)
+                if raw_text:
+                    if len(raw_text.strip()) < 10:
+                        st.warning("PDFから有効なテキストが読み取れませんでした。")
+                    else:
+                        summary = generate_ai_summary(raw_text)
+                        if summary:
+                            st.session_state["ai_draft"] = {
+                                "title": new_title if new_title else "（未入力）",
+                                "category": new_cat,
+                                "description": summary.get("description", ""),
+                                "how_to_use": summary.get("how_to_use", ""),
+                                "terminology": summary.get("terminology", ""),
+                                "settings": summary.get("settings", "")
+                            }
+                            st.success("AIによる下書きが完成しました！")
+                            st.rerun()
                 else:
-                    st.warning("テキストを抽出できませんでした。")
+                    st.warning("PDFを読み取れませんでした。")
 
 # --- メインコンテンツ ---
-# データ取得（Supabaseから最新を取得）
 try:
-    # 検索条件の整理
     query = supabase.table("entries").select("*")
     if search_query:
-        # タイトルまたは内容にキーワードが含まれるものを取得
         query = query.ilike("title", f"%{search_query}%").or_("description", f"%{search_query}%")
     
     response = query.execute()
@@ -123,9 +170,7 @@ except Exception as e:
     st.error(f"データの取得に失敗しました: {e}")
     entries = []
 
-# 表示の切り替え
 if "view_id" in st.session_state:
-    # 詳細表示画面
     entry = next((e for e in entries if e["id"] == st.session_state.view_id), None)
     if entry:
         if st.button("← 一覧に戻る"):
@@ -135,22 +180,48 @@ if "view_id" in st.session_state:
         st.markdown(f"## {entry['title']}")
         st.caption(f"カテゴリ: {entry['category']}")
         st.write("---")
-        
         st.markdown("### 📝 説明")
         st.write(entry["description"])
-        
         st.markdown("### 🛠 使い方")
         st.write(entry["how_to_use"])
-        
         st.markdown("### 📖 用語")
         st.write(entry["terminology"])
-        
         st.markdown("### ⚙️ 設定")
         st.write(entry["settings"])
     else:
         st.warning("データが見つかりません。")
+
+elif "ai_draft" in st.session_state:
+    draft = st.session_state["ai_draft"]
+    st.header("🤖 AIが作った下書き")
+    st.info("内容を確認し、必要であれば修正してから「保存する」を押してください。")
+    
+    st.markdown("---")
+    final_title = st.text_input("タイトル", value=draft["title"])
+    final_cat = st.selectbox("カテゴリ", config["categories"], index=config["categories"].index(draft["category"]) if draft["category"] in config["categories"] else 0)
+    final_desc = st.text_area("説明", value=draft["description"], height=150)
+    final_how = st.text_area("使い方", value=draft["how_to_use"], height=150)
+    final_term = st.text_area("用語", value=draft["terminology"], height=100)
+    final_set = st.text_input("設定", value=draft["settings"])
+    
+    if st.button("この内容で保存する", type="primary", use_container_width=True):
+        try:
+            response = supabase.table("entries").insert({
+                "title": final_title,
+                "category": final_cat,
+                "description": final_desc,
+                "how_to_use": final_how,
+                "terminology": final_term,
+                "settings": final_set
+            }).execute()
+            if response.data:
+                st.success("保存しました！")
+                del st.session_state["ai_draft"]
+                st.rerun()
+        except Exception as e:
+            st.error(f"保存中にエラーが発生しました: {e}")
+
 else:
-    # 一覧表示画面
     if not entries:
         st.info("登録されている知識がありません。サイドバーから追加してください。")
     else:
