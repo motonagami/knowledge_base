@@ -7,7 +7,7 @@ import google.generativeai as genai
 from supabase import create_client, Client
 
 # --- 設定 ---
-# 直接書かずに、Streamlitの「Secrets」から読み込むように変更しました
+# Streamlitの「Secrets」から全ての情報を読み込みます
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
