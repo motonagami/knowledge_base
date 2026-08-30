@@ -1,6 +1,8 @@
 import streamlit as st
 import json
 import os
+import io
+import pdfplumber
 from supabase import create_client, Client
 
 # --- 設定 ---
@@ -36,13 +38,28 @@ def load_config():
 
 config = load_config()
 
+# --- 関数定義 ---
+def extract_text_from_pdf(uploaded_file):
+    """PDFから全ページ分のテキストを抽出する"""
+    try:
+        with pdfplumber.open(io.BytesIO(uploaded_file.getvalue())) as pdf:
+            full_text = ""
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    full_text += text + "\n"
+            return full_text
+    except Exception as e:
+        st.error(f"PDF処理中にエラーが発生しました: {e}")
+        return None
+
 # --- 画面の構成 ---
-st.set_page_config(page_title="自分専用・知識ベース", layout="centered")
+st.set_page_config(page_title="自分専用・知識ベース", layout="wide")
 
 st.title("📚 知識ベース")
 st.write("身の回りの取説や、学んだことをストックする場所です。")
 
-# --- サイドバー：新規登録 ---
+# --- サイドバー ---
 with st.sidebar:
     st.header("⚙️ 新規登録")
     new_title = st.text_input("タイトル")
@@ -76,6 +93,20 @@ with st.sidebar:
     st.write("---")
     st.header("🔍 検索")
     search_query = st.text_input("キーワードで検索")
+    
+    st.write("---")
+    st.header("📄 PDFから抽出")
+    uploaded_file = st.file_uploader("PDFファイルを選択...", type=["pdf"])
+    if uploaded_file is not None:
+        if st.button("PDFを読み取る"):
+            with st.spinner("読み取り中..."):
+                extracted_text = extract_text_from_pdf(uploaded_file)
+                if extracted_text:
+                    st.success("読み取り完了！")
+                    st.info("以下のテキストをコピーして「新規登録」に貼り付けてください。")
+                    st.text_area("抽出された内容", extracted_text, height=300)
+                else:
+                    st.warning("テキストを抽出できませんでした。")
 
 # --- メインコンテンツ ---
 # データ取得（Supabaseから最新を取得）
