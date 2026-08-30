@@ -20,7 +20,7 @@ except KeyError:
 try:
     genai.configure(api_key=GEMINI_API_KEY)
     # モデルを安定した 'gemini-pro' に設定
-    model = genai.GenerativeModel('models/gemini-2.0-flash')
+    model = genai.GenerativeModel('models/gemini-3.6-flash')
 except Exception as e:
     st.error(f"AIの初期化に失敗しました: {e}")
 
