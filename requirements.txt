@@ -1,4 +1,5 @@
 streamlit
+supabase
 yfinance
 pandas
-supabase
+pdfplumber
