@@ -3,3 +3,4 @@ supabase
 yfinance
 pandas
 pdfplumber
+google-generativeai
