@@ -85,6 +85,7 @@ def generate_ai_summary(raw_text):
 
 # --- 画面の構成 ---
 st.set_page_config(page_title="自分専用・知識ベース", layout="wide")
+
 st.title("📚 知識ベース")
 st.write("身の回りの取説や、学んだことをストックする場所です。")
 
@@ -143,35 +144,24 @@ with st.sidebar:
                 else:
                     st.warning("PDFを読み取れませんでした。")
 
-# --- メインコンテンツ ---
+# --- データの取得 ---
 try:
-    # ここで「検索条件」を付けずに全件取得します
+    # データベースから全件取得
     response = supabase.table("entries").select("*").execute()
-    all_entries = response.data
-    
-    # --- 検索処理（Python側で実行） ---
-    entries = all_entries
-    if search_query:
-        # ここで検索キーワードが含まれているか判定します
-        # データベースへの命令を使わないので、絶対にエラーになりません
-        entries = [
-            e for e in all_entries 
-            if search_query.lower() in e["title"].lower() 
-            or search_query.lower() in e["description"].lower()
-            or search_query.lower() in e["how_to_use"].lower()
-            or search_query.lower() in e["terminology"].lower()
-        ]
+    all_entries = response.data or []
 except Exception as e:
     st.error(f"データの取得に失敗しました: {e}")
-    entries = []
+    all_entries = []
 
-# 表示の切り替え
-if "view_id" in st.session_state:
+# --- 表示の切り替えロジック ---
+if "view_id" in st.session_state and st.session_state.view_id is not None:
+    # 詳細表示画面
     entry = next((e for e in all_entries if e["id"] == st.session_state.view_id), None)
     if entry:
         if st.button("← 一覧に戻る"):
             st.session_state.view_id = None
             st.rerun()
+        
         st.markdown(f"## {entry['title']}")
         st.caption(f"カテゴリ: {entry['category']}")
         st.write("---")
@@ -212,6 +202,20 @@ elif "ai_draft" in st.session_state:
             st.error(f"保存中にエラーが発生しました: {e}")
 
 else:
+    # 一覧表示画面（ここを修正しました）
+    if search_query:
+        # 検索窓に文字が入っているときは、そのキーワードでフィルタリング
+        entries = [
+            e for e in all_entries 
+            if search_query.lower() in e["title"].lower() 
+            or search_query.lower() in e["description"].lower()
+            or search_query.lower() in e["how_to_use"].lower()
+            or search_query.lower() in e["terminology"].lower()
+        ]
+    else:
+        # 検索窓が空のときは、すべてのデータを表示
+        entries = all_entries
+
     if not entries:
         st.info("登録されている知識がありません。サイドバーから追加してください。")
     else:
